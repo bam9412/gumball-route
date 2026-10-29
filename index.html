@@ -92,5 +92,7 @@ const ci=col('id'),cn=col('name'),ca=col('address','area or cross streets','area
 if(cn<0)return toast('CSV needs a Name column');const g=(r,i)=>i>=0?(r[i]||'').trim():'';
 const L=R.slice(1).filter(r=>cs<0||/^active$/i.test(g(r,cs))).map((r,n)=>{let lv=g(r,cl);const d=new Date(lv);lv=lv&&!isNaN(d)?d.toISOString().slice(0,10):'';return{id:g(r,ci)||('IMP-'+(n+1)),name:g(r,cn),address:g(r,ca),machines:g(r,cm),hours:g(r,ch),last:lv}}).filter(l=>l.name);
 if(!L.length)return toast('No active rows found');if(!ask($('imp'),'',true,L.length))return;S.locs=L;save();renderX();toast(L.length+' locations loaded')};
-render();try{if((location.protocol==='https:'||location.hostname==='localhost')&&'serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(function(){})}catch(e){}
+render();try{if((location.protocol==='https:'||location.hostname==='localhost')&&'serviceWorker'in navigator)(function(){var had=!!navigator.serviceWorker.controller,ss=null;try{ss=window.sessionStorage}catch(e){}
+navigator.serviceWorker.addEventListener('controllerchange',function(){if(!had){had=true;return}var k='gb_reloaded',t=0;try{t=+(ss&&ss.getItem(k))||0}catch(e){}if(Date.now()-t<10000)return;try{ss&&ss.setItem(k,String(Date.now()))}catch(e){}if(window.__gbR)return;window.__gbR=1;location.reload()});
+navigator.serviceWorker.register('sw.js').then(function(r){try{r.update()}catch(e){}}).catch(function(){})})()}catch(e){}
 </script></body></html>
