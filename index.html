@@ -18,6 +18,7 @@ input,textarea,select{width:100%;font-size:18px;padding:12px;border:1px solid #b
 .fr{background:#fff;border:1px solid #ddd;border-radius:12px;padding:8px;margin:0 0 10px}.fr .sm{margin:6px 0 4px}.lv{display:flex;gap:4px}.lv button{flex:1;padding:14px 2px;font-size:15px;border:2px solid #aaa;background:#fff;border-radius:10px}.lv button.sel{background:#264653;color:#fff;border-color:#264653}.addm{background:none;border:0;color:#e4572e;font-size:16px;padding:8px}
 .badge{float:right;font-weight:700}.over .badge{color:#d00}pre{white-space:pre-wrap;background:#fff;border:1px solid #ddd;padding:10px;font-size:13px}
 .cty{display:flex;gap:8px;margin-top:8px}.cty button{flex:1;padding:10px;font-size:17px;font-weight:700;border:2px solid #fff;border-radius:10px;background:transparent;color:#fff}.cty button.on{background:#fff;color:#e4572e}body.lincoln header{background:#1d6fa5}body.lincoln .cty button.on{color:#1d6fa5}#toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 18px;border-radius:20px;display:none;z-index:9}
+.day{background:#fff;border:1px solid #ddd;border-radius:12px;margin:8px 0}.day summary{padding:14px 12px;font-weight:700;font-size:18px;cursor:pointer;list-style:none}.day summary::-webkit-details-marker{display:none}.day summary:before{content:"▸ ";color:#e4572e}.day[open] summary:before{content:"▾ "}.day .cnt{float:right;font-size:15px;color:#555}.stp{border-top:1px solid #eee;padding:10px 12px}.stp .what{font-size:14px;font-weight:600;color:#2a9d8f}.stp.rm .what{color:#b00020}
 </style></head><body>
 <header>🍬 Gumball Route – <span id="cityname">Omaha</span><div class="cty"><button data-c="omaha">Omaha</button><button data-c="lincoln">Lincoln</button></div></header><div id="toast"></div>
 <section id="s-list" class="on"><input id="q" placeholder="Search locations…" type="search"><div id="list"></div></section>
@@ -36,7 +37,8 @@ input,textarea,select{width:100%;font-size:18px;padding:12px;border:1px solid #b
 <button class="btn alt" id="xsync">Mark all as synced (this city)</button><pre id="xtext"></pre>
 <h2>Undo / restore removed locations</h2><div id="rlist" class="sm"></div><h2>Refresh locations</h2><div class="sm">CSV with columns: ID, Name, Address (or "Area or cross streets"), Machines (or "Machine types and counts"), Status, Last visit. Only Active rows are kept; lock/key columns are ignored.</div>
 <input type="file" id="imp" accept=".csv,text/csv"><div class="sm" id="lcount"></div></section>
-<nav><button data-s="list" class="on">📍 Stops</button><button data-s="more">💵 Deposit / New</button><button data-s="export">📤 Export</button></nav>
+<section id="s-days"><h2>By Day – <span id="dcity">Omaha</span></h2><div class="sm" id="dsum"></div><div id="dlist"></div></section>
+<nav><button data-s="list" class="on">📍 Stops</button><button data-s="days">📅 By Day</button><button data-s="more">💵 Deposit / New</button><button data-s="export">📤 Export</button></nav>
 <script>
 window.onerror=function(m,u,l,c,e){var b=document.getElementById('err');if(!b){b=document.createElement('div');b.id='err';b.style.cssText='background:#900;color:#fff;padding:10px;font-size:14px;white-space:pre-wrap';document.body.insertBefore(b,document.body.firstChild)}b.textContent+='Error: '+m+' (line '+l+')\n';return false};
 </script><script>
@@ -49,13 +51,13 @@ if(!DB||typeof DB!=='object'||!DB.cities){let old=null;if(ST){try{old=JSON.parse
 ['omaha','lincoln'].forEach(c=>{DB.cities[c]=fixS(DB.cities[c],c)});if(!SEEDS[DB.city])DB.city='omaha';let S=DB.cities[DB.city];
 function save(){if(!ST)return;try{ST.setItem(K,JSON.stringify(DB))}catch(e){}}save();
 function paintCity(){const n=CITY_NAMES[DB.city];const cn=document.getElementById('cityname');if(cn)cn.textContent=n;try{document.title='Gumball Route – '+n}catch(e){}if(document.body&&document.body.classList)document.body.classList.toggle('lincoln',DB.city==='lincoln');Array.prototype.forEach.call(document.querySelectorAll('.cty button'),b=>{b.classList.toggle('on',b.getAttribute('data-c')===DB.city)})}
-function setCity(c){if(!SEEDS[c]||c===DB.city){paintCity();return}DB.city=c;S=DB.cities[c];cur=null;save();paintCity();const q=document.getElementById('q');if(q)q.value='';show('list');toast('Switched to '+CITY_NAMES[c])}
+function setCity(c){if(!SEEDS[c]||c===DB.city){paintCity();return}DB.city=c;S=DB.cities[c];cur=null;save();paintCity();try{renderDays()}catch(e){}const q=document.getElementById('q');if(q)q.value='';show('list');toast('Switched to '+CITY_NAMES[c])}
 Array.prototype.forEach.call(document.querySelectorAll('.cty button'),b=>{b.onclick=()=>setCity(b.getAttribute('data-c'))});
 if(!ST){const w=document.createElement('div');w.style.cssText='background:#ffd54f;color:#000;padding:10px 14px;font-size:15px;font-weight:600';w.textContent='⚠ Storage is blocked in this viewer, so entries will NOT be saved after you close it. Export before closing, or open the page in Safari/Chrome.';document.body.insertBefore(w,document.querySelector('header').nextSibling)}
 const $=id=>document.getElementById(id),today=()=>{const d=new Date();d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,10)};
 function toast(t){const e=$('toast');e.textContent=t;e.style.display='block';setTimeout(()=>e.style.display='none',1800)}
 function show(s){document.querySelectorAll('section').forEach(x=>x.classList.toggle('on',x.id=='s-'+s));document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.s==s));if(s=='list')
-render();if(s=='export')renderX();scrollTo(0,0)}
+render();if(s=='export')renderX();if(s=='days')renderDays();scrollTo(0,0)}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>show(b.dataset.s));
 function lastOf(l){let d=l.last||'';S.entries.forEach(e=>{if(e.type=='visit'&&e.locId==l.id&&e.date>d)d=e.date});return d}
 function days(d){return d?Math.floor((new Date(today())-new Date(d))/864e5):null}
@@ -99,6 +101,14 @@ const ci=col('id'),cn=col('name'),ca=col('address','area or cross streets','area
 if(cn<0)return toast('CSV needs a Name column');const g=(r,i)=>i>=0?(r[i]||'').trim():'';
 const L=R.slice(1).filter(r=>cs<0||/^active$/i.test(g(r,cs))).map((r,n)=>{let lv=g(r,cl);const d=new Date(lv);lv=lv&&!isNaN(d)?d.toISOString().slice(0,10):'';return{id:g(r,ci)||('IMP-'+(n+1)),name:g(r,cn),address:g(r,ca),machines:g(r,cm),hours:g(r,ch),last:lv}}).filter(l=>l.name);
 if(!L.length)return toast('No active rows found');if(!ask($('imp'),'',true,L.length))return;S.locs=L;save();renderX();toast(L.length+' locations loaded')};
+function dayLabel(d){var p=String(d||'').split('-');if(p.length!==3)return d||'(no date)';var dt=new Date(+p[0],+p[1]-1,+p[2]);if(isNaN(dt.getTime()))return d;try{return dt.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric',year:'numeric'})}catch(e){return d}}
+function lvTxt(b,a){if(!b&&!a)return '';return 'was '+(b||'?')+(a?', added '+a:'')}
+function stopHtml(e,i){var rm=e.type==='removal',w=rm?'Removed':e.type==='restored'?'Restored':(e.gum==='Y'&&e.toys==='Y')?'Refilled gum + toys':e.gum==='Y'?'Refilled gum':e.toys==='Y'?'Refilled toys':(e.gum==='N'||e.toys==='N')?'Checked – no refill':'Visited';var g=lvTxt(e.gumBefore,e.gumAdded),t=lvTxt(e.toyBefore,e.toyAdded);
+return '<div class="stp'+(rm?' rm':'')+'"><b>'+(i+1)+'. '+esc(e.locName||e.locId||'')+'</b> <span class="sm">'+esc(e.locId||'')+'</span><div class="what">'+esc(w)+(e.synced?'':' · unsynced')+'</div>'+(g?'<div class="sm">Gum: '+esc(g)+'</div>':'')+(t?'<div class="sm">Toys: '+esc(t)+'</div>':'')+(e.notes?'<div class="sm">📝 '+esc(e.notes)+'</div>':'')+'</div>'}
+function groupDays(entries){var by={},order=[];(entries||[]).forEach(function(e,ix){if(!e||(e.type!=='visit'&&e.type!=='removal'&&e.type!=='restored'))return;var d=e.date||'';if(!by[d]){by[d]=[];order.push(d)}by[d].push({e:e,ix:ix})});order.sort(function(a,b){return a<b?1:a>b?-1:0});
+return order.map(function(d){var a=by[d].slice().sort(function(x,y){var cx=x.e.created||'',cy=y.e.created||'';return cx<cy?-1:cx>cy?1:x.ix-y.ix});return{date:d,stops:a.map(function(x){return x.e})}})}
+function renderDays(){var el=$('dlist');if(!el)return;$('dcity').textContent=CITY_NAMES[DB.city];var g=groupDays(S.entries),n=0;g.forEach(function(d){n+=d.stops.length});$('dsum').textContent=g.length?(g.length+' day'+(g.length>1?'s':'')+' worked · '+n+' stop'+(n>1?'s':'')+' logged in this app'):'';
+el.innerHTML=g.length?g.map(function(d,k){return '<details class="day"'+(k===0?' open':'')+'><summary>'+esc(dayLabel(d.date))+'<span class="cnt">'+d.stops.length+' stop'+(d.stops.length>1?'s':'')+'</span></summary>'+d.stops.map(stopHtml).join('')+'</details>'}).join(''):'<p>No visits logged for '+esc(CITY_NAMES[DB.city])+' yet. Visits you save on the Stops tab will appear here, grouped by day.</p>'}
 paintCity();render();try{if((location.protocol==='https:'||location.hostname==='localhost')&&'serviceWorker'in navigator)(function(){var had=!!navigator.serviceWorker.controller,ss=null;try{ss=window.sessionStorage}catch(e){}
 navigator.serviceWorker.addEventListener('controllerchange',function(){if(!had){had=true;return}var k='gb_reloaded',t=0;try{t=+(ss&&ss.getItem(k))||0}catch(e){}if(Date.now()-t<10000)return;try{ss&&ss.setItem(k,String(Date.now()))}catch(e){}if(window.__gbR)return;window.__gbR=1;location.reload()});
 navigator.serviceWorker.register('sw.js').then(function(r){try{r.update()}catch(e){}}).catch(function(){})})()}catch(e){}

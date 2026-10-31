@@ -1,4 +1,4 @@
-const C='gumball-v7',F=['./','index.html','manifest.webmanifest','icon-192.png','icon-512.png'];
+const C='gumball-v8',F=['./','index.html','manifest.webmanifest','icon-192.png','icon-512.png'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(F.map(u=>new Request(u,{cache:'reload'})))));self.skipWaiting()});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!=C).map(x=>caches.delete(x)))).then(()=>self.clients.claim()))});
 function isPage(req){if(req.mode==='navigate')return true;const u=new URL(req.url);return u.origin===location.origin&&(/\/index\.html$/.test(u.pathname)||u.pathname===new URL('./',location.href).pathname)}
