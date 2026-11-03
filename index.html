@@ -41,7 +41,7 @@ input,textarea,select{width:100%;font-size:18px;padding:12px;border:1px solid #b
 <button class="btn alt" id="xsync">Mark all as synced (this city)</button><pre id="xtext"></pre>
 <h2>Undo / restore removed locations</h2><div id="rlist" class="sm"></div><h2>Refresh locations</h2><div class="sm">CSV with columns: ID, Name, Address (or "Area or cross streets"), Machines (or "Machine types and counts"), Status, Last visit. Only Active rows are kept; lock/key columns are ignored.</div>
 <input type="file" id="imp" accept=".csv,text/csv"><div class="sm" id="lcount"></div>
-<h2>Sheet sync (optional)</h2><div class="sm">Paste the Google Apps Script web app URL and the shared token. When set, new visits, deposits and mileage are sent to the sheet automatically and retried when back online. Leave blank to keep using CSV export.</div><label>Sync URL</label><input id="surl" type="url" placeholder="https://script.google.com/macros/s/…/exec"><label>Sync token</label><input id="stok" type="password" autocomplete="off"><button class="btn alt" id="ssave">Save sync settings</button><div class="sm" id="sstat"></div></section>
+<h2>Sheet sync (optional)</h2><div class="sm">Paste the Google Apps Script web app URL and the shared token. When set, new visits, deposits and mileage are sent to the sheet automatically and retried when back online. Leave blank to keep using CSV export.</div><label>Sync URL</label><input id="surl" type="url" placeholder="https://script.google.com/macros/s/…/exec"><label>Sync token</label><input id="stok" type="password" autocomplete="off"><button class="btn alt" id="ssave">Save sync settings</button><div class="sm" id="sstat"></div><button class="btn alt" id="ssend" type="button" style="display:none;padding:10px;font-size:16px">Send now</button></section>
 <section id="s-days"><h2>By Day – <span id="dcity">Omaha</span></h2><div class="sm" id="dsum"></div><div id="dlist"></div></section>
 <nav><button data-s="list" class="on">📍 Stops</button><button data-s="days">📅 By Day</button><button data-s="more">💵 Deposit</button><button data-s="miles">🚗 Miles</button><button data-s="map">🗺️ Map</button><button data-s="export">📤 Export</button></nav>
 <script>
@@ -153,14 +153,30 @@ if(loadedMap!==mid){box.innerHTML='';var f=document.createElement('iframe');f.sr
 function payload(kind,e){if(kind==='mileage')return{date:e.date,start:e.start,end:e.end,miles:mi(e),notes:e.notes||''};if(kind==='deposit')return{date:e.date,amount:e.amount,notes:e.notes||''};if(kind==='prospect')return{date:e.date,name:e.locName||'',address:e.address||'',contact:e.contact||'',notes:e.notes||''};
 return{date:e.date,locId:e.locId,locName:e.locName,gum:e.gum||'',toys:e.toys||'',notes:e.notes||'',gumBefore:e.gumBefore||'',toyBefore:e.toyBefore||'',gumAdded:e.gumAdded||'',toyAdded:e.toyAdded||''}}
 function queue(city,kind,action,e){if(!DB.sync||!DB.sync.url)return;DB.outbox=DB.outbox.filter(function(o){return o.id!==e.id});DB.outbox.push({id:e.id,city:city,kind:kind,action:action,data:payload(kind,e),tries:0});save();flush()}
-let flushing=false;
+let flushing=false,flushGen=0,syncErr='',syncBusySince=0;
 function markSynced(o){var arr=o.kind==='mileage'?DB.mileage:((DB.cities[o.city]||{}).entries||[]);var e=arr.find(function(x){return x.id===o.id});if(e)e.synced=true}
-function flush(){if(flushing||!DB.sync||!DB.sync.url||!DB.outbox.length||!isOnline()||typeof fetch!=='function')return;flushing=true;var o=DB.outbox[0];
-fetch(DB.sync.url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({token:DB.sync.token||'',id:o.id,city:o.city,kind:o.kind,action:o.action,data:o.data})}).then(function(){
-DB.outbox=DB.outbox.filter(function(x){return x!==o});if(o.action!=='delete')markSynced(o);save();flushing=false;try{paintSync()}catch(e){}if(DB.outbox.length)setTimeout(flush,300)}).catch(function(){o.tries=(o.tries||0)+1;save();flushing=false;try{paintSync()}catch(e){}})}
-function paintSync(){var st=$('sstat');if(st)st.textContent=DB.sync.url?('Sync on · '+DB.outbox.length+' waiting to send'+(isOnline()?'':' (offline)')):'Sync off (CSV export only).'}
-$('surl').value=DB.sync.url||'';$('stok').value=DB.sync.token||'';paintSync();
-$('ssave').onclick=function(){var u=$('surl').value.trim();if(u&&!/^https:\/\//.test(u))return toast('URL must start with https://');DB.sync.url=u;DB.sync.token=$('stok').value.trim();if(!u)DB.outbox=[];save();paintSync();flush();toast(u?'Sync on ✔':'Sync off')};
+/* CORS read of the Apps Script JSON reply ({ok:true}|{ok:false,error}). Falls back to no-cors (opaque = assume delivered; Code.gs dedupes by id). 20s timeout always resets flushing. */
+function postSync(url,bodyStr,mode,signal){var opt={method:'POST',mode:mode,redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:bodyStr};if(signal)opt.signal=signal;return fetch(url,opt)}
+function flush(force){if(force===true&&flushing&&Date.now()-syncBusySince>5000)flushing=false;
+if(flushing||!DB.sync||!DB.sync.url||!Array.isArray(DB.outbox)||!DB.outbox.length||!isOnline()||typeof fetch!=='function')return;
+flushing=true;syncBusySince=Date.now();var gen=++flushGen,o=DB.outbox[0],ctl=null;try{if(typeof AbortController==='function')ctl=new AbortController()}catch(e){ctl=null}
+var bodyStr=JSON.stringify({token:DB.sync.token||'',id:o.id,city:o.city,kind:o.kind,action:o.action,data:o.data});
+function done(ok,err){if(gen!==flushGen)return;clearTimeout(timer);flushGen++;flushing=false;
+if(ok){DB.outbox=DB.outbox.filter(function(x){return x!==o});if(o.action!=='delete')markSynced(o);syncErr=''}else{o.tries=(o.tries||0)+1;o.err=String(err||'failed');syncErr=o.err}
+save();try{paintSync()}catch(e){}if(ok&&DB.outbox.length)setTimeout(flush,300)}
+var timer=setTimeout(function(){try{if(ctl)ctl.abort()}catch(e){}done(false,'timed out (20s)')},20000);
+postSync(DB.sync.url,bodyStr,'cors',ctl&&ctl.signal).then(function(r){return r.text().then(function(t){var j=null;try{j=JSON.parse(t)}catch(e){}
+if(j&&j.ok===true)return done(true);if(j&&j.error)return done(false,'server: '+j.error);done(false,'unexpected reply (HTTP '+r.status+') – is the script deployed with access "Anyone"?')})},function(e){
+if(gen!==flushGen)return;if(e&&e.name==='AbortError')return done(false,'timed out (20s)');
+/* CORS-blocked or network error: retry once opaque */
+postSync(DB.sync.url,bodyStr,'no-cors',ctl&&ctl.signal).then(function(){done(true)},function(e2){done(false,(e2&&e2.name==='AbortError')?'timed out (20s)':'network error: '+((e2&&e2.message)||e2))})})}
+function paintSync(){var st=$('sstat'),sb=$('ssend');if(!st)return;if(!DB.sync.url){st.textContent='Sync off (CSV export only).';if(sb)sb.style.display='none';return}
+var n=DB.outbox.length,o=DB.outbox[0],t='Sync on · '+n+' waiting to send'+(isOnline()?'':' (offline)')+(flushing?' · sending…':'');
+if(n&&o&&(o.tries||o.err))t+=' · tries: '+(o.tries||0)+(o.err?' · last error: '+o.err:'');else if(syncErr)t+=' · last error: '+syncErr;
+st.textContent=t;if(sb)sb.style.display=n?'block':'none'}
+$('surl').value=DB.sync.url||'';$('stok').value=DB.sync.token||'';if(!Array.isArray(DB.outbox))DB.outbox=[];paintSync();flush();paintSync();
+$('ssend').onclick=function(){if(!isOnline())return toast('Offline – will send when back online');DB.outbox.forEach(function(o){o.err=''});syncErr='';flush(true);paintSync();toast('Sending…')};
+$('ssave').onclick=function(){var u=$('surl').value.trim();if(u&&!/^https:\/\//.test(u))return toast('URL must start with https://');DB.sync.url=u;DB.sync.token=$('stok').value.trim();if(!u)DB.outbox=[];DB.outbox.forEach(function(o){o.err='';o.tries=0});syncErr='';save();flush(true);paintSync();toast(u?'Sync on ✔':'Sync off')};
 try{window.addEventListener('online',function(){flush();paintSync();try{if($('s-map').classList.contains('on'))renderMap()}catch(e){}});window.addEventListener('offline',function(){paintSync();try{if($('s-map').classList.contains('on'))renderMap()}catch(e){}})}catch(e){}
 try{document.addEventListener('visibilitychange',function(){if(!document.hidden)flush()})}catch(e){}setInterval(flush,60000);setTimeout(flush,2000);
 
